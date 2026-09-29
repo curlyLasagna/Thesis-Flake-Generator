@@ -15,13 +15,20 @@ When a course or repository contains multiple modules or assignments, this skill
 Determine whether the task is a greenfield creation from natural language instructions or a brownfield migration from an existing project directory:
 
 * **Case A: Greenfield Assignments (Natural Language Instructions)**
-  Use this case when an instructor is creating an assignment or course module for the first time from scratch and already knows the languages, compilers, runtimes, and dependencies they plan to use:
-  1. Identify whether the prompt specifies a single assignment or multiple course modules/assignments (e.g., "Assignment 1: Java graph search; Assignment 2: PyTorch neural networks").
-  2. If multiple modules/assignments are described:
-     * Decompose the course into distinct directories (e.g., `./assignment-1/`, `./assignment-2/`, or `./lab-1/`, `./lab-2/`).
+  Use this case when an instructor is creating a totally new assignment or course module for the first time from scratch and already knows the languages, compilers, runtimes, and dependencies they plan to use:
+  1. Determine the target project directory:
+     * By default, generate all files directly inside the **current working directory (`.`)**.
+     * If the prompt or instructor explicitly specifies a subfolder or path name, create that directory relative to the current working directory (`mkdir -p <project-dir>`).
+     * Never create projects in the global agent scratch directory (e.g. `~/.gemini/antigravity-cli/scratch`) unless explicitly requested.
+  2. Initialize or confirm a Git repository inside the target project directory if not already present:
+     ```bash
+     git init
+     ```
+  3. If multiple course modules or assignments are described within the prompt:
+     * Create distinct subdirectories for each module/assignment (e.g., `./assignment-1/`, `./assignment-2/`).
      * Extract the planned languages, compilers, runtimes, and libraries for each module.
-  3. If a single assignment is described, determine or create its target directory (e.g., `./course-env` or `<assignment-name>/`).
-  4. Prepare the candidate tool list per module for deterministic verification in Step 3.
+  4. Prepare the candidate tool list per module for deterministic verification via `mcp-nixos` in Step 3.
+  5. The `flake.nix` file will be generated directly inside that target directory (or within each module subdirectory if multiple assignments are specified).
 
 * **Case B: Brownfield Projects & Flake Migrations (Project Folder Provided)**
   Use this case for existing codebases or when instructors are migrating existing assignments/repositories to use `flake.nix` development environments:
@@ -48,35 +55,42 @@ To ensure package names and development dependencies are deterministic across al
      }
    }
    ```
-2. Confirm the `mcp-nixos` tools (`nix` and `nix_versions`) are available. If `mcp-nixos` is not reachable, do not hallucinate package names; notify the user to ensure `uvx` and `mcp-nixos` are configured, or use the local fallback query script `scripts/query-nixos.py`.
+2. Confirm the `mcp-nixos` tools (`nix` and `nix_versions`) are available. If `mcp-nixos` is not reachable, do not hallucinate package names; notify the user to ensure `uvx` and `mcp-nixos` are configured.
 3. For query shapes and search parameters, read `references/mcp-nixos.md`.
 
 ### Step 3: Query and Resolve Packages Deterministically
 For each module/assignment identified:
 
-1. Query `mcp-nixos` using the `nix` tool or run `scripts/query-nixos.py`:
-   ```bash
-   python3 scripts/query-nixos.py --search "<package_name>"
+1. Query `mcp-nixos` using the `nix` tool (`action: "search"`, `type: "packages"`):
+   ```json
+   {
+     "action": "search",
+     "query": "<candidate_tool>",
+     "type": "packages",
+     "channel": "unstable",
+     "limit": 10
+   }
    ```
 2. Verify exact attribute paths (e.g., `mysql84` instead of `mysql80`, `openjdk17` instead of `jdk17`).
-3. If specific version compatibility is required, inspect details using `nix` tool (`action: "info"`, `type: "package"`) or:
-   ```bash
-   python3 scripts/query-nixos.py --info "<exact_attribute>"
-   ```
+3. If specific version compatibility is required, inspect details using the `nix` tool (`action: "info"`, `type: "package"`) or the `nix_versions` tool.
 4. If packages require unfree licenses (e.g., CUDA, proprietary database tools, MySQL Workbench), note that `allowUnfree = true` must be enabled in that module's devShell.
 
 ### Step 4: Synthesize a `flake.nix` for Each Module / Assignment
-For **each** module or assignment directory:
+For **each** project or module/assignment directory:
 
 1. Read `assets/flake-devshell.template.nix` and `references/flake-patterns.md`.
-2. Write a self-contained `flake.nix` located directly inside that module's directory:
+2. Write a self-contained `flake.nix` located directly inside that target directory (the new greenfield project directory created in Case A, or each assignment directory):
    * Populate `description` with the module/assignment name.
    * Include standard inputs: `nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable"` and `flake-utils.url = "github:numtide/flake-utils"`.
    * Under `flake-utils.lib.eachDefaultSystem`, import `pkgs` with `config.allowUnfree = true;`.
    * Define `devShells.default = pkgs.mkShell { ... }` populated strictly with that module's packages.
    * Set relevant environment variables (e.g., `JAVA_HOME = "${pkgs.openjdk17}";` for Java modules).
    * Configure `shellHook` with a clear message: `"Entering environment for <Module Name>"`.
-3. **Architecture Rule:** Do NOT combine multiple assignments into a single monolithic flake with named shells (e.g., `devShells.module1`, `devShells.module2`). Generating an individual `flake.nix` per module guarantees that `cd <module_dir> && nix develop` works immediately without parameters.
+3. In Git repositories (such as the newly initialized project from Case A), stage `flake.nix` so the Nix flake evaluator recognizes the file:
+   ```bash
+   git -C <target_dir> add flake.nix
+   ```
+4. **Architecture Rule:** Do NOT combine multiple assignments into a single monolithic flake with named shells (e.g., `devShells.module1`, `devShells.module2`). Generating an individual `flake.nix` per module guarantees that `cd <module_dir> && nix develop` works immediately without parameters.
 
 ### Step 5: Validate Flake Environments
 Test the generated `flake.nix` in every module/assignment directory before concluding:
@@ -97,6 +111,6 @@ Test the generated `flake.nix` in every module/assignment directory before concl
 ## Error Handling
 
 * **Missing MCP Server Connection:** If `uvx` fails or `mcp-nixos` cannot start, verify Astral `uv` is installed (`which uvx`). Ensure `.agents/mcp_config.json` matches `assets/mcp-servers.template.json`.
-* **Package Attribute Not Found:** If a search query returns no results, check `references/inferring-requirements.md` for alternative aliases or use `python3 scripts/query-nixos.py --search "<broader_term>"`.
+* **Package Attribute Not Found:** If a search query returns no results, try querying `mcp-nixos` with broader generic keywords or alternative tool names.
 * **Unfree Package Evaluation Error:** If `nix develop` fails with "Package has an unfree license", verify that `config.allowUnfree = true;` is present in `flake.nix` and `NIXPKGS_ALLOW_UNFREE=1` is exported.
 * **Module Disambiguation:** If an assignment folder contains no manifests or obvious source files, inspect parent documentation (`README.md`, syllabus) or prompt text to determine the intended tooling.

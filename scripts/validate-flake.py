@@ -28,6 +28,10 @@ def validate_flake(flake_dir: Path, allow_unfree: bool = True, test_command: str
 
     print(f"--> Validating flake at: {flake_file}")
 
+    # Ensure flake.nix is staged if inside a git repository (Nix flakes require tracked files)
+    if (flake_dir / ".git").exists() or subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=flake_dir, capture_output=True).returncode == 0:
+        subprocess.run(["git", "add", "-N", "flake.nix"], cwd=flake_dir, capture_output=True)
+
     # Step 1: nix flake check
     print("--> Running: nix flake check --extra-experimental-features 'nix-command flakes'")
     check_proc = subprocess.run(

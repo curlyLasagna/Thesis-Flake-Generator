@@ -3,6 +3,7 @@
 Inspects a project folder for manifest files, source code, and documentation
 to infer environment requirements for each distinct module/assignment.
 Ensures each module/assignment can receive a dedicated flake.nix for 'nix develop'.
+Outputs high-level conceptual tools and search keywords without hardcoding Nix package names.
 """
 
 import os
@@ -19,65 +20,67 @@ IGNORED_DIRS = {
 }
 
 EXTENSION_MAP = {
-    ".py": ("python", "python3"),
-    ".ipynb": ("python", "python3"),
-    ".java": ("java", "openjdk"),
-    ".rs": ("rust", "rustc"),
+    ".py": ("python", "python"),
+    ".ipynb": ("python", "python"),
+    ".java": ("java", "java"),
+    ".rs": ("rust", "rust"),
     ".go": ("go", "go"),
-    ".c": ("c", "gcc"),
-    ".h": ("c", "gcc"),
-    ".cpp": ("cpp", "gcc"),
-    ".cc": ("cpp", "gcc"),
-    ".hpp": ("cpp", "gcc"),
+    ".c": ("c", "c compiler"),
+    ".h": ("c", "c compiler"),
+    ".cpp": ("cpp", "c++ compiler"),
+    ".cc": ("cpp", "c++ compiler"),
+    ".hpp": ("cpp", "c++ compiler"),
     ".ts": ("typescript", "nodejs"),
     ".js": ("javascript", "nodejs"),
     ".scala": ("scala", "scala"),
-    ".r": ("r", "R"),
-    ".sql": ("sql", "mysql84"),
+    ".r": ("r", "r"),
+    ".sql": ("sql", "sql"),
 }
 
 MANIFEST_RULES = [
-    ("pom.xml", ["maven", "openjdk17"]),
-    ("build.gradle", ["gradle", "openjdk17"]),
-    ("build.gradle.kts", ["gradle", "openjdk17"]),
-    ("requirements.txt", ["python3", "uv"]),
-    ("pyproject.toml", ["python3", "uv", "poetry"]),
-    ("Pipfile", ["python3", "pipenv"]),
+    ("pom.xml", ["maven", "java"]),
+    ("build.gradle", ["gradle", "java"]),
+    ("build.gradle.kts", ["gradle", "java"]),
+    ("requirements.txt", ["python"]),
+    ("pyproject.toml", ["python"]),
+    ("Pipfile", ["python", "pipenv"]),
     ("package.json", ["nodejs"]),
     ("pnpm-lock.yaml", ["nodejs", "pnpm"]),
     ("yarn.lock", ["nodejs", "yarn"]),
-    ("Cargo.toml", ["rustc", "cargo"]),
+    ("Cargo.toml", ["rust", "cargo"]),
     ("go.mod", ["go"]),
-    ("CMakeLists.txt", ["cmake", "gcc", "gnumake"]),
-    ("Makefile", ["gnumake", "gcc"]),
+    ("CMakeLists.txt", ["cmake", "c/c++ compiler", "make"]),
+    ("Makefile", ["make", "c/c++ compiler"]),
     ("docker-compose.yml", ["docker-compose"]),
     ("Dockerfile", ["docker"]),
 ]
 
 DOC_KEYWORDS = {
-    r"\bmysql[\s_-]?workbench\b": ["mysql-workbench", "mysql84"],
-    r"\bmysql\b": ["mysql84", "mysql-client"],
+    r"\bmysql[\s_-]?workbench\b": ["mysql workbench", "mysql"],
+    r"\bmysql\b": ["mysql"],
     r"\bpostgres(ql)?\b": ["postgresql"],
     r"\bmongodb\b": ["mongodb"],
     r"\bsqlite\b": ["sqlite"],
     r"\bredis\b": ["redis"],
-    r"\bpytorch\b": ["python3", "uv"],
-    r"\btensorflow\b": ["python3", "uv"],
+    r"\bpytorch\b": ["pytorch", "python"],
+    r"\btensorflow\b": ["tensorflow", "python"],
     r"\bopencv\b": ["opencv"],
-    r"\bjava\s?17\b": ["openjdk17"],
-    r"\bjava\s?21\b": ["openjdk21"],
-    r"\bjava\s?8\b": ["openjdk8"],
-    r"\bjava\s?11\b": ["openjdk11"],
-    r"\bpython\s?3\.13\b": ["python313"],
-    r"\bpython\s?3\.12\b": ["python312"],
-    r"\bpython\s?3\.11\b": ["python311"],
-    r"\bnode(js)?\s?20\b": ["nodejs_20"],
-    r"\bnode(js)?\s?22\b": ["nodejs_22"],
+    r"\bjava\s?17\b": ["java 17"],
+    r"\bjava\s?21\b": ["java 21"],
+    r"\bjava\s?8\b": ["java 8"],
+    r"\bjava\s?11\b": ["java 11"],
+    r"\bpython\s?3\.13\b": ["python 3.13"],
+    r"\bpython\s?3\.12\b": ["python 3.12"],
+    r"\bpython\s?3\.11\b": ["python 3.11"],
+    r"\bnode(js)?\s?20\b": ["nodejs 20"],
+    r"\bnode(js)?\s?22\b": ["nodejs 22"],
     r"\bwireshark\b": ["wireshark"],
+    r"\btcpdump\b": ["tcpdump"],
     r"\bvalgrind\b": ["valgrind"],
     r"\bgdb\b": ["gdb"],
     r"\bclang\b": ["clang"],
     r"\bgcc\b": ["gcc"],
+    r"\bnasm\b": ["nasm"],
 }
 
 MODULE_DIR_PATTERN = re.compile(
@@ -89,7 +92,7 @@ def analyze_directory(dir_path: Path):
     detected_languages = set()
     manifests = []
     docs = []
-    candidates = set()
+    detected_tools = set()
 
     for root, dirs, files in os.walk(dir_path):
         dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not d.startswith(".")]
@@ -101,23 +104,27 @@ def analyze_directory(dir_path: Path):
 
             ext = file_path.suffix.lower()
             if ext in EXTENSION_MAP:
-                lang, default_pkg = EXTENSION_MAP[ext]
+                lang, default_tool = EXTENSION_MAP[ext]
                 detected_languages.add(lang)
-                candidates.add(default_pkg)
+                detected_tools.add(default_tool)
 
-            for manifest_name, suggested_pkgs in MANIFEST_RULES:
+            for manifest_name, suggested_tools in MANIFEST_RULES:
                 if filename.lower() == manifest_name.lower():
                     manifests.append(rel_file)
-                    candidates.update(suggested_pkgs)
+                    detected_tools.update(suggested_tools)
                     try:
                         content = file_path.read_text(errors="ignore")
                         if filename == "pom.xml":
                             m = re.search(r"<java\.version>(\d+)</java\.version>", content)
                             if m:
-                                candidates.add(f"openjdk{m.group(1)}")
+                                detected_tools.add(f"java {m.group(1)}")
                         elif filename == "pyproject.toml":
+                            if "poetry" in content.lower():
+                                detected_tools.add("poetry")
+                            if "uv" in content.lower():
+                                detected_tools.add("uv")
                             if "torch" in content.lower():
-                                candidates.update(["python3", "uv"])
+                                detected_tools.add("pytorch")
                     except Exception:
                         pass
 
@@ -126,19 +133,20 @@ def analyze_directory(dir_path: Path):
                     docs.append(rel_file)
                     try:
                         text = file_path.read_text(errors="ignore").lower()
-                        for pattern, pkgs in DOC_KEYWORDS.items():
+                        for pattern, tools in DOC_KEYWORDS.items():
                             if re.search(pattern, text):
-                                candidates.update(pkgs)
+                                detected_tools.update(tools)
                     except Exception:
                         pass
 
-    candidates.add("git")
+    detected_tools.add("git")
+    tools_list = sorted(list(detected_tools))
     return {
         "detected_languages": sorted(list(detected_languages)),
         "manifests": manifests,
         "docs": docs,
-        "candidate_packages": sorted(list(candidates)),
-        "suggested_mcp_queries": [{"query": pkg} for pkg in sorted(candidates)]
+        "detected_tools": tools_list,
+        "suggested_queries": [{"query": tool} for tool in tools_list]
     }
 
 def scan_project(project_path: Path):

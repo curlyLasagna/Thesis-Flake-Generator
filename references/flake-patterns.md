@@ -31,7 +31,16 @@ cd assignment-1-java
 nix develop
 ```
 
-This immediately drops them into the tailored shell
+This immediately drops them into the tailored shell.
+
+### Greenfield Project Creation
+For new course assignments created from natural language instructions (Case A):
+1. Pick a descriptive, lowercase hyphenated folder name (e.g. `cs101-lab1-graph-search`, `itec451-mysql-lab`).
+2. Create the directory and initialize a Git repository:
+   ```bash
+   mkdir -p <project-dir> && cd <project-dir> && git init
+   ```
+3. Generate `flake.nix` in that directory and stage it (`git add flake.nix`) so Nix flake evaluation recognizes the file.
 
 ---
 
