@@ -30,7 +30,7 @@ General query tool for packages, flakes, and channels.
     "action": "search",
     "query": "mysql",
     "type": "packages",
-    "channel": "unstable",
+    "channel": "stable",
     "limit": 10
   }
   ```
@@ -40,7 +40,7 @@ General query tool for packages, flakes, and channels.
     "action": "info",
     "query": "openjdk17",
     "type": "package",
-    "channel": "unstable"
+    "channel": "stable"
   }
   ```
 
