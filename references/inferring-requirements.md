@@ -4,10 +4,10 @@ When dealing with brownfield projects or migrating existing course assignments t
 
 ## 1. Automated Detection Script
 
-Execute the scanning script to gather structured metadata across the project:
+Execute the scanning script via Astral `uv` to gather structured metadata across the project:
 
 ```bash
-python3 scripts/detect-project-requirements.py --project-path /path/to/project
+uv run scripts/detect-project-requirements.py --project-path /path/to/project
 ```
 
 The script outputs JSON describing:
@@ -15,7 +15,7 @@ The script outputs JSON describing:
 * **Detected Languages**: programming languages present based on source extensions.
 * **Manifests**: build configuration files found in each module.
 * **Documentation**: relevant READMEs, syllabi, or lab instructions.
-* **Detected Tools & Keywords**: conceptual tools, frameworks, and search keywords extracted from files and documentation.
+* **Detected Tools & Suggested Queries**: base tools and runtimes identified from build manifests and source file extensions.
 
 ## 2. Manifest Inspection Heuristics
 
@@ -69,7 +69,7 @@ Inspect manifest files in each module to determine the required tools and versio
 
 ## 3. Course Documentation & Syllabus Analysis
 
-Inspect documentation files (`README.md`, `INSTRUCTIONS.md`, syllabi, lab guides, assignment prompts) for mentions of external services, specialized tools, or lab environments:
+Inspect documentation files (`README.md`, `INSTRUCTIONS.md`, syllabi, lab guides, assignment prompts) directly to infer requirements for external services, specialized tools, or lab environments without relying on keyword-matching dictionaries:
 * **Databases & Data Stores**: Look for mentions of relational databases (e.g., MySQL, PostgreSQL, SQLite) or key-value stores, along with GUI/CLI clients (e.g., database workbenches or shells).
 * **Systems, Security & Low-Level Labs**: Look for mentions of debugging tools (e.g., GDB, Valgrind), assemblers, disassemblers, system call tracers, or compilation flags.
 * **Networking Labs**: Look for mentions of packet analysis utilities, network sniffers, or socket programming utilities.

@@ -12,7 +12,7 @@ When a course or repository contains multiple modules or assignments, this skill
 ## Workflow Procedures
 
 ### Step 1: Analyze Input and Requirements
-Determine whether the task is a greenfield creation from natural language instructions or a brownfield migration from an existing project directory:
+Determine whether the task is a greenfield creation from natural language instructions, a brownfield migration from an existing project directory, or an instruction document (PDF/DOCX/Markdown):
 
 * **Case A: Greenfield Assignments (Natural Language Instructions)**
   Use this case when an instructor is creating a totally new assignment or course module for the first time from scratch and already knows the languages, compilers, runtimes, and dependencies they plan to use:
@@ -32,48 +32,55 @@ Determine whether the task is a greenfield creation from natural language instru
 
 * **Case B: Brownfield Projects & Flake Migrations (Project Folder Provided)**
   Use this case for existing codebases or when instructors are migrating existing assignments/repositories to use `flake.nix` development environments:
-  1. Scan the project folder to detect distinct submodules, assignment folders, and build manifests:
+  1. Scan the project folder to detect distinct submodules, assignment folders, build manifests, and localized instruction documents:
      ```bash
-     python3 scripts/detect-project-requirements.py --project-path <PROJECT_DIR>
+     uv run scripts/detect-project-requirements.py --project-path <PROJECT_DIR>
      ```
   2. Inspect the output:
      * If `mode: "per_module"`, process each detected module in `modules` independently (e.g., `Assignment 1`, `Project2`, `hw1`). Each module directory will receive its own `flake.nix` inferred from its localized artifacts.
      * If `mode: "single_project"`, process the single project root directory.
-  3. For complex artifact heuristics (e.g., inferring versions from `pom.xml`, `pyproject.toml`, or syllabus documents), read `references/inferring-requirements.md`.
+  3. If localized documentation (`README.md`, lab guides, instructions) was discovered in `docs`, read the file contents to infer any additional tools, libraries, or external dependencies not captured in build manifests.
+  4. For complex artifact heuristics (e.g., inferring versions from `pom.xml`, `pyproject.toml`, or syllabus documents), read `references/inferring-requirements.md`.
 
-### Step 2: Ensure `mcp-nixos` MCP Server Connection
-To ensure package names and development dependencies are deterministic across all environments, connect to the `mcp-nixos` MCP server:
+* **Case C: Syllabus, Assignment Guides, or Instruction Documents (PDF, DOCX, or Text Files Provided)**
+  Use this case when an instructor or student provides an instructional document file (e.g., `lab1.pdf`, `assignment-guide.docx`, `setup.txt`, `README.md`, or course syllabus):
+  1. Parse the document using the extraction script executed via Astral `uv`:
+     ```bash
+     uv run scripts/extract-document-content.py <PATH_TO_DOCUMENT>
+     ```
+     The script uses `Docling` with PEP 723 inline script metadata (`# /// script ... # ///`) configured specifically to optimize for pure text extraction by disabling image generation and picture classification (`generate_page_images=False`, `generate_picture_images=False`, `do_picture_classification=False`, `image_placeholder=""`, with optional OCR via `--ocr`). It natively parses Word documents (`.docx`), PDFs, and text files under the open-source MIT license, extracting clean structured markdown text without commercial licensing restrictions.
+  2. The script provides the agent with:
+     * `instructional_context`: Sections describing prerequisites, tools, environment variables, and execution steps.
+     * `extracted_content`: Full markdown text extracted from the document.
+  3. Carefully analyze `instructional_context` and `extracted_content` to infer required programming languages, compilers, runtimes, databases, services, or developer utilities without relying on pre-mapped keyword dictionaries.
+  4. Proceed to Step 2 & 3 to resolve the candidate tools deterministically and Step 4 to generate the tailored `flake.nix`.
 
-1. Verify `.agents/mcp_config.json` contains the `nixos` server definition:
-   ```json
-   {
-     "mcpServers": {
-       "nixos": {
-         "command": "uvx",
-         "args": ["mcp-nixos"]
-       }
-     }
-   }
-   ```
-2. Confirm the `mcp-nixos` tools (`nix` and `nix_versions`) are available. If `mcp-nixos` is not reachable, do not hallucinate package names; notify the user to ensure `uvx` and `mcp-nixos` are configured.
-3. For query shapes and search parameters, read `references/mcp-nixos.md`.
+### Step 2: Determine Package Resolution Strategy (MCP or Nix CLI)
+To ensure package names and development dependencies are deterministic across all environments, check the available package discovery tools:
+
+1. **Check for `mcp-nixos` MCP Server:** Check if `.agents/mcp_config.json` is present and the `mcp-nixos` tools (`nix` and `nix_versions`) are available.
+   * If available, query package attributes deterministically via `mcp-nixos` in Step 3. For query shapes and search parameters, read `references/mcp-nixos.md`.
+2. **Nix CLI Mode / Fallback:** If `mcp-nixos` is not configured or unavailable (e.g., running with `--no-mcp`), do NOT hallucinate package names or halt. Instead, use the native Nix CLI via `run_command` to discover and verify package attributes:
+   * Search packages: `nix search --extra-experimental-features 'nix-command flakes' nixpkgs <candidate_tool>` (or `nix-env -qaP <candidate_tool>`).
 
 ### Step 3: Query and Resolve Packages Deterministically
 For each module/assignment identified:
 
-1. Query `mcp-nixos` using the `nix` tool (`action: "search"`, `type: "packages"`):
-   ```json
-   {
-     "action": "search",
-     "query": "<candidate_tool>",
-     "type": "packages",
-     "channel": "unstable",
-     "limit": 10
-   }
-   ```
+1. **Query Packages:**
+   * **If `mcp-nixos` is available:** Call the `nix` tool (`action: "search"`, `type: "packages"`):
+     ```json
+     {
+       "action": "search",
+       "query": "<candidate_tool>",
+       "type": "packages",
+       "channel": "stable",
+       "limit": 10
+     }
+     ```
+     If specific version compatibility is required, inspect details using the `nix` tool (`action: "info"`, `type: "package"`) or the `nix_versions` tool.
+   * **If `mcp-nixos` is unavailable (Nix CLI mode):** Run `nix search --extra-experimental-features 'nix-command flakes' github:NixOS/nixpkgs/nixos-24.11 <candidate_tool>` via `run_command` to inspect matching attributes and descriptions.
 2. Verify exact attribute paths (e.g., `mysql84` instead of `mysql80`, `openjdk17` instead of `jdk17`).
-3. If specific version compatibility is required, inspect details using the `nix` tool (`action: "info"`, `type: "package"`) or the `nix_versions` tool.
-4. If packages require unfree licenses (e.g., CUDA, proprietary database tools, MySQL Workbench), note that `allowUnfree = true` must be enabled in that module's devShell.
+3. If packages require unfree licenses (e.g., CUDA, proprietary database tools, MySQL Workbench), note that `allowUnfree = true` must be enabled in that module's devShell.
 
 ### Step 4: Synthesize a `flake.nix` for Each Module / Assignment
 For **each** project or module/assignment directory:
@@ -81,11 +88,12 @@ For **each** project or module/assignment directory:
 1. Read `assets/flake-devshell.template.nix` and `references/flake-patterns.md`.
 2. Write a self-contained `flake.nix` located directly inside that target directory (the new greenfield project directory created in Case A, or each assignment directory):
    * Populate `description` with the module/assignment name.
-   * Include standard inputs: `nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable"` and `flake-utils.url = "github:numtide/flake-utils"`.
+   * Include standard inputs: `nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11"` and `flake-utils.url = "github:numtide/flake-utils"`.
    * Under `flake-utils.lib.eachDefaultSystem`, import `pkgs` with `config.allowUnfree = true;`.
    * Define `devShells.default = pkgs.mkShell { ... }` populated strictly with that module's packages.
    * Set relevant environment variables (e.g., `JAVA_HOME = "${pkgs.openjdk17}";` for Java modules).
    * Configure `shellHook` with a clear message: `"Entering environment for <Module Name>"`.
+   * **Daemon / Service Safety:** For database or daemon environments (e.g., MySQL, Postgres), NEVER place unbounded polling loops (`while ! ping; do sleep; done` or `until [ -S ... ]; do sleep; done`) inside `shellHook`. `shellHook` executes non-interactively on every `nix develop --command` invocation; unbounded loops permanently freeze automated tools and tests. Instead, print startup commands or non-blocking setup.
 3. In Git repositories (such as the newly initialized project from Case A), stage `flake.nix` so the Nix flake evaluator recognizes the file:
    ```bash
    git -C <target_dir> add flake.nix
@@ -95,9 +103,9 @@ For **each** project or module/assignment directory:
 ### Step 5: Validate Flake Environments
 Test the generated `flake.nix` in every module/assignment directory before concluding:
 
-1. Run the validation script for each module directory:
+1. Run the validation script for each module directory via Astral `uv`:
    ```bash
-   python3 scripts/validate-flake.py --flake-dir <MODULE_DIR>
+   uv run scripts/validate-flake.py --flake-dir <MODULE_DIR>
    ```
 2. Ensure both validation checks pass:
    * `nix flake check`
@@ -110,7 +118,7 @@ Test the generated `flake.nix` in every module/assignment directory before concl
 
 ## Error Handling
 
-* **Missing MCP Server Connection:** If `uvx` fails or `mcp-nixos` cannot start, verify Astral `uv` is installed (`which uvx`). Ensure `.agents/mcp_config.json` matches `assets/mcp-servers.template.json`.
-* **Package Attribute Not Found:** If a search query returns no results, try querying `mcp-nixos` with broader generic keywords or alternative tool names.
+* **Missing MCP Server Connection:** If `mcp-nixos` is not configured, fails to start, or `--no-mcp` is active, use the native Nix CLI (`nix search nixpkgs <query>` or `nix-env -qaP <query>`) to search and verify package attributes deterministically.
+* **Package Attribute Not Found:** If a search query returns no results via MCP or Nix CLI, try querying with broader generic keywords or alternative tool names.
 * **Unfree Package Evaluation Error:** If `nix develop` fails with "Package has an unfree license", verify that `config.allowUnfree = true;` is present in `flake.nix` and `NIXPKGS_ALLOW_UNFREE=1` is exported.
 * **Module Disambiguation:** If an assignment folder contains no manifests or obvious source files, inspect parent documentation (`README.md`, syllabus) or prompt text to determine the intended tooling.

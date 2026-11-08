@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """
 Inspects a project folder for manifest files, source code, and documentation
 to infer environment requirements for each distinct module/assignment.
@@ -55,34 +59,6 @@ MANIFEST_RULES = [
     ("Dockerfile", ["docker"]),
 ]
 
-DOC_KEYWORDS = {
-    r"\bmysql[\s_-]?workbench\b": ["mysql workbench", "mysql"],
-    r"\bmysql\b": ["mysql"],
-    r"\bpostgres(ql)?\b": ["postgresql"],
-    r"\bmongodb\b": ["mongodb"],
-    r"\bsqlite\b": ["sqlite"],
-    r"\bredis\b": ["redis"],
-    r"\bpytorch\b": ["pytorch", "python"],
-    r"\btensorflow\b": ["tensorflow", "python"],
-    r"\bopencv\b": ["opencv"],
-    r"\bjava\s?17\b": ["java 17"],
-    r"\bjava\s?21\b": ["java 21"],
-    r"\bjava\s?8\b": ["java 8"],
-    r"\bjava\s?11\b": ["java 11"],
-    r"\bpython\s?3\.13\b": ["python 3.13"],
-    r"\bpython\s?3\.12\b": ["python 3.12"],
-    r"\bpython\s?3\.11\b": ["python 3.11"],
-    r"\bnode(js)?\s?20\b": ["nodejs 20"],
-    r"\bnode(js)?\s?22\b": ["nodejs 22"],
-    r"\bwireshark\b": ["wireshark"],
-    r"\btcpdump\b": ["tcpdump"],
-    r"\bvalgrind\b": ["valgrind"],
-    r"\bgdb\b": ["gdb"],
-    r"\bclang\b": ["clang"],
-    r"\bgcc\b": ["gcc"],
-    r"\bnasm\b": ["nasm"],
-}
-
 MODULE_DIR_PATTERN = re.compile(
     r"^(assignment[\s_-]?\d+|project[\s_-]?\d+|hw[\s_-]?\d+|homework[\s_-]?\d+|lab[\s_-]?\d+|module[\s_-]?\d+|week[\s_-]?\d+)",
     re.IGNORECASE
@@ -123,21 +99,12 @@ def analyze_directory(dir_path: Path):
                                 detected_tools.add("poetry")
                             if "uv" in content.lower():
                                 detected_tools.add("uv")
-                            if "torch" in content.lower():
-                                detected_tools.add("pytorch")
                     except Exception:
                         pass
 
             if filename.lower().endswith((".md", ".txt", ".pdf", ".rst")):
                 if any(k in filename.lower() for k in ["readme", "instruction", "syllabus", "lab", "setup", "assignment"]):
                     docs.append(rel_file)
-                    try:
-                        text = file_path.read_text(errors="ignore").lower()
-                        for pattern, tools in DOC_KEYWORDS.items():
-                            if re.search(pattern, text):
-                                detected_tools.update(tools)
-                    except Exception:
-                        pass
 
     detected_tools.add("git")
     tools_list = sorted(list(detected_tools))
@@ -204,6 +171,15 @@ def scan_project(project_path: Path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Infer per-module requirements for dedicated flake.nix files")
-    parser.add_argument("--project-path", default=".", help="Path to project directory (default: current dir)")
+    parser.add_argument("--project-path", default=None, help="Path to project directory (default: current dir)")
+    parser.add_argument("--doc-path", default=None, help="Path to instructional document file (DOCX, PDF, or text)")
     args = parser.parse_args()
-    scan_project(Path(args.project_path))
+
+    if args.doc_path:
+        import subprocess
+        extractor_script = Path(__file__).parent / "extract-document-content.py"
+        res = subprocess.run(["uv", "run", str(extractor_script), args.doc_path])
+        sys.exit(res.returncode)
+
+    project_dir = Path(args.project_path) if args.project_path else Path(".")
+    scan_project(project_dir)
