@@ -111,3 +111,23 @@ Certain software requires environment variables to locate libraries or runtimes:
   ```nix
   PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
   ```
+
+---
+
+## 4. Background Services & Databases (e.g., MySQL, PostgreSQL)
+
+When environments require a database or daemon:
+* **Packages**: Include the server (e.g., `pkgs.mysql84`) and client tools in `packages`.
+* **CRITICAL - No Unbounded Loops in `shellHook`**: Never place unbounded wait/polling loops (`while ! mysqladmin ping; do sleep 1; done`, `until [ -S ... ]; do sleep 0.5; done`) directly inside `shellHook`.
+  * `shellHook` runs on **every non-interactive invocation** (including `nix develop --command true`).
+  * If a background daemon fails to bind or initialize immediately, an unbounded loop blocks the shell forever and hangs all automated evaluation commands.
+* **Safe Pattern**: Provide setup commands or helper scripts/functions in `shellHook`, or initialize directories non-blockingly:
+  ```nix
+  shellHook = ''
+    export MYSQL_HOME="$PWD/.mysql"
+    echo "MySQL devShell activated."
+    echo "To initialize and run MySQL:"
+    echo "  mysqld --initialize-insecure --datadir=\$MYSQL_HOME/data"
+    echo "  mysqld --datadir=\$MYSQL_HOME/data --socket=\$MYSQL_HOME/mysql.sock &"
+  '';
+  ```
